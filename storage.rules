@@ -1,0 +1,55 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Helper function to check if user is driver
+    function isDriver() {
+      return isAuthenticated() && 
+             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role == 'driver';
+    }
+
+    // Delivery photos - only authenticated users can upload, read their own or admin can read all
+    match /delivery-photos/{userId}/{deliveryId}/{photoId} {
+      // Users can read their own photos, admins can read all
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      
+      // Users can upload their own photos, must be valid image files
+      allow write: if isAuthenticated() && 
+                      request.auth.uid == userId &&
+                      request.resource.size < 10 * 1024 * 1024 && // 10MB limit
+                      request.resource.contentType.matches('image/.*');
+    }
+
+    // Export files - only admins can access
+    match /exports/{fileName} {
+      allow read, write: if isAdmin();
+    }
+
+    // Profile pictures (optional feature)
+    match /profile-pictures/{userId} {
+      // Users can read and write their own profile picture
+      allow read, write: if isAuthenticated() && 
+                            request.auth.uid == userId &&
+                            request.resource.size < 5 * 1024 * 1024 && // 5MB limit
+                            request.resource.contentType.matches('image/.*');
+    }
+
+    // App assets and public files
+    match /public/{allPaths=**} {
+      // Anyone can read public files
+      allow read: if true;
+      // Only admins can write public files
+      allow write: if isAdmin();
+    }
+  }
+}
